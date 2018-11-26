@@ -14,14 +14,14 @@ library(tidyr)
 library(ggplot2)
 library(scales)
 library(cowplot)
-library(ggpubr)
+library(egg)
 library(grid)
 library(gridExtra)
 
 # Read in water table data
 df <- read.csv("alldata_new_sites.csv")
 
-# Get data ready
+# Get data ready, clean, format times and dates
 df$datetime <- as.POSIXct(df$datetime, 
                           format = "%Y-%m-%d %H:%M", 
                           tz = "UTC")
@@ -29,37 +29,60 @@ df$date <- as.Date(df$date,
                    format = "%Y-%m-%d", 
                    tz = "UTC")
 df$X <- NULL
-df$days <- as.Date(format(df$date, format = "%d-%m-2015"), 
-                   format = "%d-%m-%Y")
-df$datetime2 = as.POSIXct(format(df$datetime, 
-                                 format = "%d-%m-2015 %H:%M"), 
-                      format = "%d-%m-%Y %H:%M")
 
-# Check validation data
+# For later plot, make everything in the same year (2015) 
+df$date2015 <- as.Date(format(df$date, format = "%d-%m-2015"), 
+                   format = "%d-%m-%Y",
+                   tz = "UTC")
+df$datetime2015 = as.POSIXct(format(df$datetime, 
+                                 format = "%d-%m-2015 %H:%M"), 
+                      format = "%d-%m-%Y %H:%M",
+                      tz = "UTC")
+
+# Check manual water table validation data
 df_val <- read.csv("MetaData/New Sites/wt_validation.csv")
+
 df_val$datetime <- as.POSIXct(df_val$datetime_use, 
                                   format = "%m/%d/%Y %H:%M", 
                                   tz = "UTC")
-df_val$datetimeplot <- as.POSIXct(format(df_val$datetime, 
+
+df_val$datetime2015 <- as.POSIXct(format(df_val$datetime, 
                                          format = "%d-%m-2015 %H:%M"), 
                                   format = "%d-%m-%Y %H:%M")
-val_compare <- left_join(df_val, df) %>%
-  group_by(site, datetime_use) %>%
+
+val_compare <- left_join(df_val, df,
+                         by = c("site", "year", "datetime")) %>%
+  group_by(site, datetime) %>%
   summarize(wl_obs = wl_obs,
             waterlevel = waterlevel,
             dif = wl_obs/ 100 - waterlevel)
 
 # Remove data that is below sensor, or very close to sensor limit
+df$waterlevel <- ifelse(df$wtpress < 200, 
+                        NA, 
+                        df$waterlevel)
 
+# Also remove known outliers/bad data
+df[df$site == "D4" & 
+     df$datetime == as.POSIXct("2017-09-30 15:15:00", tz = "UTC"),
+   "waterlevel"] <- NA
+
+df[df$site == "D4" & 
+     df$datetime == as.POSIXct("2018-10-21 16:45:00", tz = "UTC"),
+   "waterlevel"] <- NA
+
+df[df$site == "D1" & 
+     df$datetime == as.POSIXct("2018-10-21 17:00:00", tz = "UTC"),
+   "waterlevel"] <- NA
 
 # Calculate daily means and rain sums
 mean_wt_day <- df %>% 
-  group_by(site, year, days) %>% 
+  group_by(site, year, date2015) %>% 
   dplyr::summarize(meanwt = mean(waterlevel, na.rm = TRUE),
                    sumrain = sum(rain_15min, na.rm = TRUE))
 
-# Plot of raw watertable and rainfall data
-# datetime limits for plots
+# Plots of raw watertable and rainfall data
+# First, get datetime limits for plots
 limsdt <- as.POSIXct(strptime(c("2015-05-25 0:00",
                               "2015-11-06 0:00"), 
                             format = "%Y-%m-%d %H:%M"))
@@ -77,13 +100,13 @@ for(i in levels(sites)){
 # Main water table Plot
 p_wt <- ggplot(data = dplyr::filter(df,
                                     site == i),
-               aes(x = datetime2,
+               aes(x = datetime2015,
                    y = waterlevel * 100,
                    colour = factor(year),
                    group = year)) +
   geom_line(size = 1.5) +
   geom_point(data = dplyr::filter(df_val, site == i),
-             aes(x = datetimeplot,
+             aes(x = datetime2015,
                  y = wl_obs,
                  colour = factor(year),
                  group = year),
@@ -132,7 +155,7 @@ p_wt_inset <- ggplot(data = dplyr::filter(df,
 # Plot rainfall
 p_rain <- ggplot(data = dplyr::filter(mean_wt_day,
                                       site == i),
-                 aes(x = days,
+                 aes(x = date2015,
                      y = sumrain * 100,
                      fill = factor(year),
                      group = year)) +
