@@ -114,14 +114,27 @@ df2 <- df2 %>%
                                   sensor_depth.cm)
   )
   
-# Account for cap falling off of D4 well, decreasing string length by 54 cm
+# Account for cap falling off of D4 well, decreasing string length by 50.5 cm
 df2 <- df2 %>%
   mutate(sensor_depth.cm = ifelse(site == "D4" &
-                                    between(datetime, as.POSIXct("2017-09-30 15:15",
-                                                            tz = "UTC"),
+                                    between(datetime, 
+                                            as.POSIXct("2017-09-30 15:30",
+                                                       tz = "UTC"),
                                             as.POSIXct("2018-01-01 00:00",
                                                        tz = "UTC")),
-                                  sensor_depth.cm + 54,
+                                  sensor_depth.cm + 54.5,
+                                  sensor_depth.cm)
+  )
+
+# Account for L1 well, decreasing string length by 17 cm
+df2 <- df2 %>%
+  mutate(sensor_depth.cm = ifelse(site == "L1" &
+                                    between(datetime, 
+                                            as.POSIXct("2017-08-10 11:00",
+                                                       tz = "UTC"),
+                                            as.POSIXct("2018-01-01 00:00",
+                                                       tz = "UTC")),
+                                  sensor_depth.cm + 17,
                                   sensor_depth.cm)
   )
 

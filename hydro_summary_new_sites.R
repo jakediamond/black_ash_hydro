@@ -15,8 +15,6 @@ library(ggplot2)
 library(scales)
 library(cowplot)
 library(egg)
-library(grid)
-library(gridExtra)
 
 # Read in water table data
 df <- read.csv("alldata_new_sites.csv")
@@ -57,15 +55,19 @@ val_compare <- left_join(df_val, df,
             waterlevel = waterlevel,
             dif = wl_obs/ 100 - waterlevel)
 
-# Remove data that is below sensor, or very close to sensor limit
-df$waterlevel <- ifelse(df$wtpress < 200, 
-                        NA, 
-                        df$waterlevel)
+# Remove data that is below sensor, or very close to sensor limit (except for D4 in 2017)
+df[site == "D4" &
+     year == 2017 &
+     wtpress < 100, "waterlevel"] <- NA
+
+df[!(site == "D4" &
+       year == 2017) &
+     wtpress < 250, "waterlevel"] <- NA
 
 # Also remove known outliers/bad data
-df[df$site == "D4" & 
-     df$datetime == as.POSIXct("2017-09-30 15:15:00", tz = "UTC"),
-   "waterlevel"] <- NA
+# df[df$site == "D4" & 
+#      df$datetime == as.POSIXct("2017-09-30 15:15:00", tz = "UTC"),
+#    "waterlevel"] <- NA
 
 df[df$site == "D4" & 
      df$datetime == as.POSIXct("2018-10-21 16:45:00", tz = "UTC"),
@@ -206,11 +208,16 @@ results <- mean_wt_day %>%
   group_by(site) %>%
   dplyr::filter(days < as.Date("2015-10-11"),
                 days > as.Date("2015-05-25")) %>%
-  dplyr::summarize(mean = mean(meanwt, na.rm = TRUE),
-                   median = median(meanwt, na.rm = TRUE),
-                   quant_80 = quantile(meanwt, probs = 0.8, na.rm = TRUE),
-                   quant_20 = quantile(meanwt, probs = 0.2, na.rm = TRUE),
-                   variation = var(meanwt, na.rm = TRUE)) %>%
+  dplyr::summarize(mean = mean(meanwt, 
+                               na.rm = TRUE),
+                   median = median(meanwt, 
+                                   na.rm = TRUE),
+                   quant_80 = quantile(meanwt, probs = 0.8, 
+                                       na.rm = TRUE),
+                   quant_20 = quantile(meanwt, probs = 0.2, 
+                                       na.rm = TRUE),
+                   variation = var(meanwt, 
+                                   na.rm = TRUE)) %>%
   mutate(quant_ratio = quant_80 / quant_20)
 
 # Calculate hydroperiod
