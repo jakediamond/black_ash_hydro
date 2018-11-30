@@ -1,7 +1,7 @@
 #
 # Purpose: To compare water table across sites
 # Coder: Jake Diamond
-# Date: November 21, 2017
+# Date: November 28, 2019
 #
 
 # Set Working directory
@@ -15,59 +15,46 @@ library(ggplot2)
 library(scales)
 library(cowplot)
 library(egg)
+library(viridis)
+library(lubridate)
 
-# Read in water table data
-df <- read.csv("alldata_new_sites.csv")
+# Load data
+df <- readRDS("all_black_ash_hydro")
 
-# Get data ready, clean, format times and dates
-df$datetime <- as.POSIXct(df$datetime, 
-                          format = "%Y-%m-%d %H:%M", 
-                          tz = "UTC")
-df$date <- as.Date(df$date, 
-                   format = "%Y-%m-%d", 
-                   tz = "UTC")
-df$X <- NULL
-
-# For later plot, make everything in the same year (2015) 
-df$date2015 <- as.Date(format(df$date, format = "%d-%m-2015"), 
-                   format = "%d-%m-%Y",
-                   tz = "UTC")
-df$datetime2015 = as.POSIXct(format(df$datetime, 
-                                 format = "%d-%m-2015 %H:%M"), 
-                      format = "%d-%m-%Y %H:%M",
-                      tz = "UTC")
+# For later plot, make everything in the same year (2015)
+df <- df %>%
+  mutate(date2015 = ymd(format(df$date, "2015-%m-%d")),
+         datetime2015 = ymd_hm(format(df$datetime, "2015-%m-%d %H:%M"))
+  )
 
 # Check manual water table validation data
-df_val <- read.csv("MetaData/New Sites/wt_validation.csv")
+df_val <- read.csv("MetaData/New Sites/wt_validation.csv",
+                   stringsAsFactors = FALSE)
+df_val$datetime_use <- as.POSIXct(df_val$datetime_use,
+                                format = "%m/%d/%Y %H:%M")
+df_val$datetime2015 = ymd_hm(format(df_val$datetime_use, "2015-%m-%d %H:%M"))
 
-df_val$datetime <- as.POSIXct(df_val$datetime_use, 
-                                  format = "%m/%d/%Y %H:%M", 
-                                  tz = "UTC")
-
-df_val$datetime2015 <- as.POSIXct(format(df_val$datetime, 
-                                         format = "%d-%m-2015 %H:%M"), 
-                                  format = "%d-%m-%Y %H:%M")
-
-val_compare <- left_join(df_val, df,
-                         by = c("site", "year", "datetime")) %>%
-  group_by(site, datetime) %>%
-  summarize(wl_obs = wl_obs,
-            waterlevel = waterlevel,
-            dif = wl_obs/ 100 - waterlevel)
+# val_compare <- left_join(df_val, df,
+#                          by = c("site", "year", "datetime")) %>%
+#   group_by(site, datetime) %>%
+#   summarize(wl_obs = wl_obs,
+#             waterlevel = waterlevel,
+#             dif = wl_obs/ 100 - waterlevel)
 
 # Remove data that is below sensor, or very close to sensor limit (except for D4 in 2017)
-df[site == "D4" &
-     year == 2017 &
-     wtpress < 100, "waterlevel"] <- NA
+df[df$site == "D4" &
+     df$year == 2017 &
+     df$wtpress < 100, "waterlevel"] <- NA
 
-df[!(site == "D4" &
-       year == 2017) &
-     wtpress < 250, "waterlevel"] <- NA
+df$waterlevel <- ifelse(!(df$site == "D4" &
+                            df$year == 2017) &
+                          !(df$site %in% c("L1", "L2", "L3")) &
+                          df$wtpress < 250, NA, df$waterlevel)
 
 # Also remove known outliers/bad data
-# df[df$site == "D4" & 
-#      df$datetime == as.POSIXct("2017-09-30 15:15:00", tz = "UTC"),
-#    "waterlevel"] <- NA
+df[df$site == "S2" &
+     df$datetime == as.POSIXct("2016-11-03 11:45:00", tz = "UTC"),
+   "waterlevel"] <- NA
 
 df[df$site == "D4" & 
      df$datetime == as.POSIXct("2018-10-21 16:45:00", tz = "UTC"),
@@ -92,9 +79,6 @@ limsd <- as.Date(c("2015-05-25",
                    "2015-11-06"), 
                  format = "%Y-%m-%d")
 
-# Color palette
-colpal <- c("#66CCFF", "#0000FF", "#333399")
-
 # Loop through each site to plot all on years on top of eachother
 sites <- unique(df$site)
 
@@ -106,7 +90,8 @@ p_wt <- ggplot(data = dplyr::filter(df,
                    y = waterlevel * 100,
                    colour = factor(year),
                    group = year)) +
-  geom_line(size = 1.5) +
+  geom_line(size = 1.5,
+            alpha = 0.7) +
   geom_point(data = dplyr::filter(df_val, site == i),
              aes(x = datetime2015,
                  y = wl_obs,
@@ -118,13 +103,17 @@ p_wt <- ggplot(data = dplyr::filter(df,
                    date_labels = "%b-%d",
                    limits = limsdt) +
   theme_bw() +
-  scale_colour_manual(name = "Year",
-                      values = colpal) +
+  scale_colour_viridis(name = "Year",
+                       discrete = TRUE) +
   theme(axis.title.x = element_blank(),
-        legend.position = c(0.92, 0.17),
+        legend.position = "bottom",
+        legend.direction = "horizontal",
+        legend.box.margin = margin(c(0,0,0,0), unit='cm'),
+        legend.margin = margin(c(0,0,0,0), unit = "cm"),
         panel.grid = element_blank(),
-        plot.margin = margin(0, 5.5, 5.5, 5.5)
+        plot.margin = margin(0, 5.5, 0, 5.5)
         ) +
+  guides(color = guide_legend(nrow = 1)) + 
   ylab("Relative water table (cm)") +
   geom_hline(yintercept = 0, 
              linetype = "dashed",
@@ -135,24 +124,24 @@ p_wt <- ggplot(data = dplyr::filter(df,
 # Inset plot for diel
 p_wt_inset <- ggplot(data = dplyr::filter(df,
                                           site == i,
-                                          date < "2017-07-21",
-                                          date > "2017-07-15"),
+                                          date < "2018-06-30",
+                                          date > "2018-06-23"),
                      aes(x = datetime,
                          y = waterlevel * 100)) +
-  geom_line(size = 1.5,
-            colour = colpal[2]) +
+  geom_line(size = 1.5) +
   scale_x_datetime(date_breaks = "1 days",
                date_labels = "%H") +
-  # scale_y_continuous(limits = c(-0.35, -0.2)) +
   theme_bw() +
   ylab("") + 
-  ggtitle("July 15-21, 2017") +
+  ggtitle("June 23-30, 2018") +
   theme(axis.title.x = element_blank(),
         panel.grid.major.x = element_line(size = 6),
         panel.grid.minor.x = element_blank(),
         panel.grid.major.y = element_blank(),
         panel.grid.minor.y = element_blank(),
-        axis.title.y = element_blank())
+        axis.title.y = element_blank(),
+        plot.title = element_text(size = 9),
+        plot.background = element_rect(fill = "transparent", colour = NA))
 
 # Plot rainfall
 p_rain <- ggplot(data = dplyr::filter(mean_wt_day,
@@ -162,8 +151,8 @@ p_rain <- ggplot(data = dplyr::filter(mean_wt_day,
                      fill = factor(year),
                      group = year)) +
   geom_col(position = "dodge") +
-  scale_fill_manual(name = "Year",
-                      values = colpal) +
+  scale_fill_viridis(name = "Year",
+                     discrete = TRUE) +
   scale_y_reverse(position = "right") +
   scale_x_date(date_breaks = "2 weeks",
                    date_labels = "%b-%d",
@@ -188,8 +177,10 @@ p_all <- egg::ggarrange(p_rain,
 p_full <- ggdraw() +
   draw_plot(p_all) +
   draw_plot(p_wt_inset, 
-            x = 0.07,
-            y = 0.05,
+            x = ifelse(min(df[df$site == i, "waterlevel"], na.rm = T) <= -100,
+                       0.11,
+                       0.07),
+            y = 0.1,
             width = 0.25,
             height = 0.25)
 

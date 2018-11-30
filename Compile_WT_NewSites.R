@@ -155,24 +155,24 @@ df2$waterlevel <- ifelse(df2$wtlevel >= 0,
                         NA)
 
 # Plotting level data
-plot <- ggplot(data = df2, aes(x = datetime, 
-                               y = waterlevel, 
-                               colour = as.factor(number))) +
-  theme_bw() + theme(axis.title.x = element_blank(), 
-                     axis.title.y = element_text(face = "bold", 
-                                                 vjust = 0.6),
-                     strip.text = element_text(face = "bold")) + 
-  ylab("Water Level (m)") +
-  scale_colour_manual(name = "Site Number",
-                      breaks = c(1, 2, 3, 4),
-                      values = c("black", "grey", "light blue", "blue")) +
-  geom_point(alpha = 0.3,
-             shape = 1) +
-  facet_wrap(~setting, ncol = 1) +
-  scale_y_continuous(limits = c(-1, 0.5),
-                     breaks = seq(-1, 0.5, 0.5)) +
-  scale_x_datetime(date_breaks = "3 months")
-  
-plot
+# plot <- ggplot(data = df2, aes(x = datetime, 
+#                                y = waterlevel, 
+#                                colour = as.factor(number))) +
+#   theme_bw() + theme(axis.title.x = element_blank(), 
+#                      axis.title.y = element_text(face = "bold", 
+#                                                  vjust = 0.6),
+#                      strip.text = element_text(face = "bold")) + 
+#   ylab("Water Level (m)") +
+#   scale_colour_manual(name = "Site Number",
+#                       breaks = c(1, 2, 3, 4),
+#                       values = c("black", "grey", "light blue", "blue")) +
+#   geom_point(alpha = 0.3,
+#              shape = 1) +
+#   facet_wrap(~setting, ncol = 1) +
+#   scale_y_continuous(limits = c(-1, 0.5),
+#                      breaks = seq(-1, 0.5, 0.5)) +
+#   scale_x_datetime(date_breaks = "3 months")
+#   
+# plot
 
 write.csv(df2, file = "water_table_new_sites.csv")
