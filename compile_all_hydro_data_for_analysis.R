@@ -24,10 +24,10 @@ df2 <- df2 %>%
   mutate(waterlevel = ifelse(waterlevel < -0.95 * loggerdepth, 
                              NA,
                              waterlevel)) %>%
-  select(datetime, year, id, date, waterlevel, rain_m) %>%
+  dplyr::select(datetime, year, id, date, waterlevel, rain_m) %>%
   rename(rain_15min = rain_m,
          site = id) %>%
-  filter(site %in% c("b1co", "b3co", "b6co"),
+  dplyr::filter(site %in% c("b1co", "b3co", "b6co"),
          year != 2016,
          !(site == "b6co" & year == 2011)) %>%
   mutate(site = recode(site,
@@ -44,10 +44,10 @@ df3 <- df3 %>%
   mutate(waterlevel = ifelse(waterlevel < -0.95 * depth, 
                              NA,
                              waterlevel)) %>%
-  select(datetime, year, id, waterlevel) %>%
+  dplyr::select(datetime, year, id, waterlevel) %>%
   mutate(date = date(datetime)) %>%
   rename(site = id) %>%
-  filter(site %in% c("b1co", "b3co", "b6co")) %>%
+  dplyr::filter(site %in% c("b1co", "b3co", "b6co")) %>%
   mutate(site = recode(site,
                        b1co = "L1",
                        b3co = "L2",

@@ -9,30 +9,38 @@ rm(list = ls())
 # Load Libraries
 library(dplyr)
 library(ggplot2)
-library(signal)
+library(lubridate)
+library(tidyr)
 
 # Working directory
 setwd("C:/Users/diamo/Dropbox/Projects/EAB/Data/HydroData")
 
 # Load water table data and clean it up for unnecessary columns
-df <- read.csv("alldata_new_sites.csv")
-df <- df %>%
-  dplyr::select(site, year, datetime, waterlevel, sensor_depth.cm) %>%
-  mutate(datetime = as.POSIXct(datetime, 
-                               format = "%Y-%m-%d %H:%M", 
-                               tz = "UTC")) %>%
-  rename(loggerdepth = sensor_depth.cm)
+df <- readRDS("all_black_ash_hydro")
+# df <- df %>%
+#   dplyr::select(site, 
+#                 year, 
+#                 datetime, 
+#                 waterlevel, 
+#                 sensor_depth.cm) %>%
+#   mutate(datetime = as.POSIXct(datetime, 
+#                                format = "%Y-%m-%d %H:%M", 
+#                                tz = "UTC")
+#          ) %>%
+#   rename(loggerdepth = sensor_depth.cm)
 
 # Read in rr functions (sydata)
-rr <- read.csv("rr_equations_v2.csv")
+rr <- read.csv("rain_rise_equations_all_sites.csv")
 
 # Function to put low-pass filter on data for ease of use
 lowpass_fun <- function(data, cutoff_frequency = 3) {
+  library(signal)
   names(data) <- tolower(names(data))
   # Need to remove all NAs for filter to be correct
   data$waterlevel <- ifelse(is.na(data$waterlevel), 
-                            -data$loggerdepth, 
-                            data$waterlevel)
+                            min(data$waterlevel, na.rm = TRUE), 
+                            data$waterlevel
+                            )
   data <- data[with(data, order(datetime)),]
   # Sampling rate [s^-1]
   sr <- 1 / (as.numeric(data$datetime[2] - data$datetime[1]) * 60)
@@ -66,11 +74,11 @@ white_fun <- function(data) {
   wt <- lowpass_fun(data)
   
   # Prepare data for analysis
-  wt$datetime <- as.POSIXct(wt$datetime, tz = "UTC") #UTC time zone 
-  wt$date <- as.Date(wt$datetime, tz = "UTC")
   wt$hourmin <- as.numeric(strftime(wt$datetime, 
-                        format = "%H%M", tz = "UTC"))
-  dates <- as.Date(wt$datetime)
+                                    format = "%H%M", 
+                                    tz = "UTC")
+                           )
+  dates <- wt$date
   
   # Detrend water table data to make hydraulic head of 
   # the recovery source constant
@@ -127,13 +135,16 @@ white_fun <- function(data) {
                             lag(m), 
                             ifelse(lag(sign_test) == -1, 
                                    lag(m, 2), 
-                                   m)))
-    trends <- trends %>% 
-      mutate(b.use = ifelse(sign_test == -1, 
+                                   m)
+                            ),
+             b.use = ifelse(sign_test == -1, 
                             lag(b), 
                             ifelse(lag(sign_test) == -1, 
                                    lag(b, 2), 
-                                   b)))
+                                   b)
+                            )
+             )
+
     df <- merge(data, trends, by = "date", sort = FALSE)
     df <- df[order(df$datetime , decreasing = FALSE),]
     
@@ -207,7 +218,8 @@ white_fun <- function(data) {
     group_by(date) %>% 
     do(mid_fun(.)) %>% 
     as.data.frame() %>% 
-    mutate(S = filtered - lead(filtered)) %>% as.data.frame()
+    mutate(S = filtered - lead(filtered)) %>% 
+    as.data.frame()
   
   et_df <- S_results %>% 
     dplyr::select(date, S) %>% 
@@ -219,12 +231,13 @@ white_fun <- function(data) {
 # Function to compute specific yield based on rain:rise functions for each site
 sy_fun <- function(ETdata, rr_funs = rr) {
   combine <- merge(ETdata, rr_funs)
-  wt <- combine$avg_wt[1] / 100 # meters
+  wt <- combine$avg_wt[1] # meters
   a <- combine$a[1]
-  b <- combine$b[1]
+  a2 <- combine$a2[1]
+  int <- combine$int[1]
   sy.min <- combine$minsy[1]
   sy.max <- combine$maxsy[1]
-  sy.ini <- a * exp(b * wt)
+  sy.ini <-  a * wt + a2 * wt^2 + int
   if (sy.ini < sy.min) {
     sy <- sy.min
   } else {
@@ -239,47 +252,43 @@ sy_fun <- function(ETdata, rr_funs = rr) {
 # Apply functions to get first estimates of ET
 et <- df %>% 
   group_by(site, year) %>% 
-  do(white_fun(.))
+  do(white_fun(.)) %>%
+  ungroup()
   
-write.csv(et, "rawet_new_sites_EAB.csv")
+# write.csv(et, "rawet_new_sites.csv")
 
 Sy <- et %>% 
-  group_by(block, treatment, date) %>% 
-  do(Sy = sy_fun(.))
-et <- merge(et, Sy)
-et$ETSy <- et$ET * unlist(et$Sy)
+  group_by(site, date) %>% 
+  do(Sy = sy_fun(.)) %>%
+  unnest()
+
+et <- left_join(et, Sy)
+et$ETSy <- et$ET * et$Sy
 
 # Need to clean data
 # First, look at rainfall
-df$date <- as.Date(df$date)
 rainsummary <- df %>% 
-  group_by(block, treatment, date) %>% 
-  summarise(rain = sum(rain_m, na.rm = TRUE))
+  group_by(site, date) %>% 
+  summarise(rain = sum(rain_15min, na.rm = TRUE))
 
-et <- merge(et, rainsummary)
+et <- left_join(et, rainsummary)
 et_norain <- et[et$rain == 0,]
 
-# Next, look at water level: 
-# don't want ET if waterlevel is hovering near the bottom of the well
-et_clean <- df %>% 
-  dplyr::select(block, treatment, year, loggerdepth) %>% 
-  distinct() %>% 
-  inner_join(et_norain)
-et_clean$loggerdepth <- -et_clean$loggerdepth
-et_clean2 <- et_clean %>%
-  dplyr::filter(avg_wt > 0.975 * loggerdepth)
-et_clean$Sy <- unlist(et_clean$Sy)
-write.csv(et_clean, "et_all_EAB.csv")
+# Next, remove days when S = 0, or negative ET, too big ET
+et_clean <- et_norain %>%
+  dplyr::filter(S > 0.001,
+                ETSy > 0,
+                ETSy < 0.015)
+write.csv(et_clean, "et_all_sites.csv")
 
-# Compare data loss monthly distribution
-library(lubridate)
-et$month <- month(et$date)
-et_clean$month <- month(et_clean$date)
-et_clean2$month <- month(et_clean2$date)
-rain.days <- anti_join(et, et_clean, by = c("block", "treatment", "date"))
-ggplot(data = rain.days) + geom_histogram(aes(month)) #+ facet_wrap()
-wl.days <- anti_join(et_clean, et_clean2, by = c("block", "treatment", "date"))
-ggplot(data = wl.days) + geom_histogram(aes(month)) #+ facet_wrap()
+# # Compare data loss monthly distribution
+# et$month <- month(et$date)
+# et_clean$month <- month(et_clean$date)
+# et_clean2$month <- month(et_clean2$date)
+# rain.days <- anti_join(et, et_clean, by = c("block", "treatment", "date"))
+# ggplot(data = rain.days) + geom_histogram(aes(month)) #+ facet_wrap()
+# wl.days <- anti_join(et_clean, et_clean2, by = c("block", "treatment", "date"))
+# ggplot(data = wl.days) + geom_histogram(aes(month)) #+ facet_wrap()
 
 
 
@@ -331,13 +340,18 @@ sum <- et_clean %>%
 # df2$julian <- as.numeric(format(df2$date, "%j"))
 et_clean$julian <- as.numeric(format(et_clean$date, "%j"))
 
-library(ggplot2)
+
 time_plot <-
-  ggplot(data = et_clean %>% dplyr::filter(block == "b1"),
-         aes(x = julian, y = et.pet, colour = treatment)) +
-  theme_bw() + theme(axis.title.x = element_blank(),
-                     axis.title.y = element_text(face = "bold", vjust = 0.6),
-                     strip.text = element_text(face = "bold")) +
+  ggplot(data = et_clean,
+         aes(x = julian, 
+             y = ETSy * 100, 
+             colour = year)) +
+  theme_bw() + 
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_text(face = "bold", vjust = 0.6),
+        strip.text = element_text(face = "bold")) +
   ylab("ET (cm)") +
-  geom_line(stat = "smooth", method = "loess", size = 2) + geom_point() + facet_wrap(~ year)  + ylim(0,2)
+  geom_line(stat = "smooth", method = "loess", size = 2) + 
+  geom_point() + 
+  facet_wrap(~ site)
 time_plot
