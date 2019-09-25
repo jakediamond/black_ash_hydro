@@ -11,7 +11,7 @@ library(ggmap)
 # Google now needs API...
 # if(!requireNamespace("devtools")) install.packages("devtools")
 # devtools::install_github("dkahle/ggmap", ref = "tidyup")
-register_google(key = "AIzaSyDLCGET5bdTMniSAH8oGDmuz19cYrJFNGY")
+register_google(key ="")
 library(ggrepel)
 library(cowplot)
 library(rgdal)
