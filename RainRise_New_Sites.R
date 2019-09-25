@@ -1,18 +1,17 @@
 ###############################################################
 #Purpose: To calculate rain:rise for new sites
 #Coder: Jake Diamond
-#Date: November 8, 2017
+#Date: September 25, 2019
 ###############################################################
 # Working directory
-setwd("C:/Users/Jake/Dropbox/Projects/EAB/Data/HydroData")
+setwd("C:/Users/jake.diamond/Dropbox/Projects/EAB/Data/HydroData")
 
 # Load Libraries
-library(dplyr)
-library(ggplot2)
+library(tidyverse)
 library(lubridate)
 
 # Read in data
-df <- readRDS("all_black_ash_hydro")
+df <- readRDS("all_black_ash_hydro_new")
 df <- dplyr::rename(df, rain_m = rain_15min)
 
 # Rain:Rise function
@@ -245,7 +244,7 @@ rain_cutoff <- 0.005
 df_reg <- df_reg[df_reg$MaxRain > rain_cutoff, ]
 
 # Look at data
-ggplot(data = df_reg, 
+(ggplot(data = df_reg, 
        aes(x = AverageStage, 
            y = clean_rr, 
            colour = as.factor(year))) + 
@@ -254,9 +253,16 @@ ggplot(data = df_reg,
   geom_smooth(
               method = "lm", 
               formula = y ~ x + I(x^2),
-              aes(color="Exp Model"), 
+              color="red",
               se = FALSE, 
-              linetype = 1)
+              linetype = 1) +
+    theme_bw()+
+    scale_color_viridis_d(name = "Year") +
+    ylab("Rain:Rise") +
+    xlab("Average stage (m)")) %>%
+  ggsave(filename = "Figures/rain_rise.tiff",
+         device = "tiff",
+         dpi = 300)
 
 # Function to get exponential Sy relationship for each site
 quad_fun <- function(data) {

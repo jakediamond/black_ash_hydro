@@ -13,45 +13,24 @@ library(lubridate)
 library(tidyr)
 
 # Working directory
-setwd("C:/Users/diamo/Dropbox/Projects/EAB/Data/HydroData")
+setwd("C:/Users/jake.diamond/Dropbox/Projects/EAB/Data/HydroData")
 
-# Load water table data and clean it up for unnecessary columns
-df <- readRDS("all_black_ash_hydro")
+# Load filtered water table data and clean it up for unnecessary columns
+df <- readRDS("all_black_ash_hydro_filtered")
+df_raw <- readRDS("all_black_ash_hydro_new")
 
 # Read in rr functions (sydata)
 rr <- read.csv("rain_rise_equations_all_sites.csv")
 
-# Function to put low-pass filter on data for ease of use
-lowpass_fun <- function(data, cutoff_frequency = 3) {
-  library(signal)
-  names(data) <- tolower(names(data))
-  # Need to remove all NAs for filter to be correct
-  data$waterlevel <- ifelse(is.na(data$waterlevel), 
-                            min(data$waterlevel, na.rm = TRUE), 
-                            data$waterlevel
-                            )
-  data <- data[with(data, order(datetime)),]
-  # Sampling rate [s^-1]
-  sr <- 1 / (as.numeric(data$datetime[2] - data$datetime[1]) * 60)
-  # Nyquist frequency = half the sampling rate
-  nyq <- sr / 2
-  # Cutoff frequency (hours^-1)
-  cutoff <- 1 / (cutoff_frequency * 60 * 60)
-  # Normalized cutoff frequency for Butterworth filter
-  W <- cutoff / nyq
-  # Butterworth low-pass filter, digital, 2nd order
-  myfilter <- butter(2, W, type = 'low', plane = 'z')
-  # Forward-reverse filter to remove phase-shift 
-  # associated with Butterworth filter (must be in vector-form)
-  vec <- as.vector(data$waterlevel)
-  filtered <- filtfilt(myfilter, vec)
-  # Filtered data
-  data$filtered <- filtered
-  data <- data[with(data, order(datetime)), ]
-  rem <- sr / cutoff
-  data <- data[-c(1:rem, (nrow(data) - rem):nrow(data)),]
-}
+# Load PET data
+pet <- read.csv("RAWS_PET.csv")
+pet$Date <- as.Date(pet$Date, format = "%m/%d/%Y")
+pet$year <- NULL
+names(pet) <- tolower(names(pet))
+pet$pet <- pet$pet_mm / 1000 #m
 
+
+# Define functions --------------------------------------------------------
 # Function to compute ET, not compensated by specific yield, 
 # via White method (1932)
 white_fun <- function(data) {
@@ -60,13 +39,13 @@ white_fun <- function(data) {
   #h = water table dependent groundwater flow
   
   # Low-pass filter data to remove noise that confounds ET estimates
-  wt <- lowpass_fun(data)
+  wt <- data
   
   # Prepare data for analysis
   wt$hourmin <- as.numeric(strftime(wt$datetime, 
                                     format = "%H%M", 
-                                    tz = "UTC")
-                           )
+                                    tz = "UTC"))
+  wt$date <- lubridate::date(wt$datetime)
   dates <- wt$date
   
   # Detrend water table data to make hydraulic head of 
@@ -125,15 +104,15 @@ white_fun <- function(data) {
                             ifelse(lag(sign_test) == -1, 
                                    lag(m, 2), 
                                    m)
-                            ),
-             b.use = ifelse(sign_test == -1, 
-                            lag(b), 
-                            ifelse(lag(sign_test) == -1, 
-                                   lag(b, 2), 
-                                   b)
-                            )
-             )
-
+      ),
+      b.use = ifelse(sign_test == -1, 
+                     lag(b), 
+                     ifelse(lag(sign_test) == -1, 
+                            lag(b, 2), 
+                            b)
+      )
+      )
+    
     df <- merge(data, trends, by = "date", sort = FALSE)
     df <- df[order(df$datetime , decreasing = FALSE),]
     
@@ -182,7 +161,7 @@ white_fun <- function(data) {
   nighttime_values <-
     wt[strftime(wt$datetime, format = "%H", tz = "UTC") %in%
          c("00", "01", "02", "03", "04", "05"), ]
-
+  
   r.df <- nighttime_values %>% 
     group_by(date) %>% 
     do(slope_fun(.)) %>% 
@@ -198,7 +177,7 @@ white_fun <- function(data) {
   h <- df.dt %>% 
     group_by(date) %>% 
     summarize(h = sum(r))
-
+  
   meanwt <- wt %>% 
     group_by(date) %>% 
     summarise(avg_wt = mean(filtered))
@@ -238,13 +217,12 @@ sy_fun <- function(ETdata, rr_funs = rr) {
   }
 }
 
-# Apply functions to get first estimates of ET
+
+# Apply functions to get first estimates of ET ----------------------------
 et <- df %>% 
   group_by(site, year) %>% 
   do(white_fun(.)) %>%
   ungroup()
-  
-# write.csv(et, "rawet_new_sites.csv")
 
 Sy <- et %>% 
   group_by(site, date) %>% 
@@ -254,9 +232,10 @@ Sy <- et %>%
 et <- left_join(et, Sy)
 et$ETSy <- et$ET * et$Sy
 
-# Need to clean data
+
+# Clean ET data -----------------------------------------------------------
 # First, look at rainfall
-rainsummary <- df %>% 
+rainsummary <- df_raw %>% 
   group_by(site, date) %>% 
   summarise(rain = sum(rain_15min, na.rm = TRUE))
 
@@ -268,44 +247,11 @@ et_clean <- et_norain %>%
   dplyr::filter(S > 0.001,
                 ETSy > 0,
                 ETSy < 0.015)
-write.csv(et_clean, "et_all_sites.csv")
-
-# # Compare data loss monthly distribution
-# et$month <- month(et$date)
-# et_clean$month <- month(et_clean$date)
-# et_clean2$month <- month(et_clean2$date)
-# rain.days <- anti_join(et, et_clean, by = c("block", "treatment", "date"))
-# ggplot(data = rain.days) + geom_histogram(aes(month)) #+ facet_wrap()
-# wl.days <- anti_join(et_clean, et_clean2, by = c("block", "treatment", "date"))
-# ggplot(data = wl.days) + geom_histogram(aes(month)) #+ facet_wrap()
+# Save data
+saveRDS(et_clean, "et_all_sites")
 
 
-
-
-
-# Derivative of filtered, sign change test, want at least 2 between 5am and 8pm, no more than 3, timing of sign change
-# sc <- df %>% group_by(block, treatment, year) %>% do(lowpass_fun(., cutoff_frequency = 5)) %>% as.data.frame() %>%
-#   mutate(der = lead(filtered) - filtered) %>% select(block, treatment, date, der) %>% group_by(block, treatment, date) %>%
-#   mutate(signchange = sign(lead(der))/sign(der)) %>% group_by(block, treatment, date) %>%
-#   summarize(signcount = sum(signchange[which(signchange<0)]))
-# 
-# et_cleanest <- merge(et_clean, sc)
-# et_cleanest <- et_cleanest[et_cleanest$signcount > -3, ]
-# et_cleanest <- et_cleanest[et_cleanest$signcount < -1, ]
-# et_cleanest$Sy2 <- unlist(et_cleanest$Sy)
-# et_cleanest$Sy <- NULL
-# write.csv(et_cleanest, "et2.csv")
-
-pet <- read.csv("RAWS_PET.csv")
-pet$Date <- as.Date(pet$Date, format = "%m/%d/%Y")
-pet$year <- NULL
-names(pet) <- tolower(names(pet))
-pet$pet <- pet$pet_mm / 1000 #m
-
-# et_cleanest <- merge(et_cleanest, pet, by = "date")
-# et_cleanest$et.pet <- et_cleanest$ETSy / et_cleanest$pet
-# write.csv(et_cleanest,"et_pet.csv")
-
+# Look at ET/PET ----------------------------------------------------------
 et_clean <- merge(et_clean, pet, by = "date")
 et_clean$et.pet <- et_clean$ETSy / et_clean$pet
 et_clean$year <- et_clean$year.x
@@ -313,35 +259,74 @@ et_clean$year.x <- NULL
 et_clean$year.y <- NULL
 write.csv(et_clean,"et_pet.csv")
 
-# sum <- et_cleanest %>% 
-#   group_by(block, treatment, year) %>% 
-#   filter(ETSy > 0, et.pet < 3) %>%
-#   summarize(sum = sum(ETSy))
-
+# Sum of ET, summarize with rain
 sum <- et_clean %>%
   group_by(site, year) %>%
   dplyr::filter(ETSy > 0, et.pet < 3) %>%
-  dplyr::summarize(sum = sum(ETSy))
+  dplyr::summarize(sum = sum(ETSy)) %>%
+  left_join(rainsummary %>%
+              mutate(year = year(date)) %>%
+              group_by(site, year) %>%
+              dplyr::summarize(rain = sum(rain))) %>%
+  mutate(et_ppt = sum / rain)
 
-# df2 <- read.csv("et_pet.csv")
-# df2$date <- as.Date(df2$date, format = "%Y-%m-%d")
-
-# df2$julian <- as.numeric(format(df2$date, "%j"))
+# Some plotting -----------------------------------------------------------
 et_clean$julian <- as.numeric(format(et_clean$date, "%j"))
 
-
-time_plot <-
-  ggplot(data = et_clean,
-         aes(x = julian, 
-             y = ETSy * 100, 
-             colour = year)) +
+# Time plot of ET
+(ggplot(data = et_clean,
+       aes(x = julian, 
+           y = ETSy * 100, 
+           colour = as.factor(year))) +
   theme_bw() + 
-  # scale_y_continuous(limits = c(0, 3)) +
   theme(axis.title.x = element_blank(),
         axis.title.y = element_text(face = "bold", vjust = 0.6),
         strip.text = element_text(face = "bold")) +
   ylab("ET (cm)") +
-  geom_line(stat = "smooth", method = "loess", size = 2) + 
-  geom_point() + 
-  facet_wrap(~ site)
-time_plot
+    scale_color_viridis_d(name = "Year") +
+  geom_line(stat = "smooth", method = "loess", size = 2, color = "red") + 
+  geom_point(alpha = 0.2) + 
+  facet_wrap(~ site)) %>%
+  ggsave(filename = "Figures/ET_time_series.tiff",
+         device = "tiff",
+         dpi = 300)
+
+# Time plot of ET/PET
+(ggplot(data = et_clean,
+        aes(x = avg_wt, 
+            y = et.pet, 
+            colour = julian)) +
+    theme_bw() + 
+    ylab("ET/PET") +
+    xlab("Mean daily water level (m)") +
+    scale_y_continuous(limits = c(0, 3)) + 
+    # scale_x_continuous(breaks = seq(-0.7, 0.2, 0.5)) +
+    scale_color_viridis_c(name = "Julian date") +
+    geom_line(stat = "smooth", method = "loess", size = 2, color = "red") +
+    geom_point(alpha = 0.3) + 
+    facet_wrap(~ site, scales = "free_x")) %>%
+  ggsave(filename = "Figures/ET_PET_watertable.tiff",
+         device = "tiff",
+         dpi = 300)
+
+# Monthtly plot of ET
+(ggplot(data = et_clean %>%
+          mutate(month = month(date)),
+        aes(x = month, 
+            y = ETSy * 100)) +
+    theme_bw() + 
+    ylab("Mean daily ET (cm/d)") +
+    xlab("Month") +
+    stat_summary(fun.y = mean, geom = "point") + 
+    stat_summary(fun.data = mean_cl_boot, 
+                 geom = "errorbar", width = 0.2) + 
+    geom_hline(data = et_clean %>%
+                 group_by(site) %>%
+                 summarize(mean = mean(ETSy, na.rm = TRUE) * 100),
+               aes(yintercept = mean),
+               linetype = "dashed", 
+               color = "red") +
+    facet_wrap(~ site, scales = "free_x")) %>%
+  ggsave(filename = "Figures/ET_monthly.tiff",
+         device = "tiff",
+         dpi = 300)
